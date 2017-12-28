@@ -17,7 +17,9 @@
   },
   "homepage": "https://github.com/alexozer/terration#readme",
   "dependencies": {
+    "@types/geojson": "^7946.0.0",
     "aframe": "^0.7.1",
+    "d3-geo-voronoi": "0.0.5",
     "mouse-event-offset": "^3.0.2",
     "mouse-wheel": "^1.2.0",
     "stats-js": "^1.0.0-alpha1",
