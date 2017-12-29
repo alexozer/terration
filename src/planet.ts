@@ -1,5 +1,5 @@
-import * as d3 from 'd3'
-import * as GeoJSON from 'geojson'
+import * as GJ from 'geojson'
+import * as d3 from 'd3-geo-voronoi'
 
 const EPSILON = 0.0000001
 
@@ -19,7 +19,7 @@ function randomSpherePoints(radius, density, minDistance: number): THREE.Vector3
   for (let i = 0; i < pts.length; i++) {
     for (let j = i + 1; j < pts.length; ) {
       if (pts[i].distanceToSquared(pts[j]) < minDistance * minDistance) {
-        pts = pts.splice(j, 1)
+        pts.splice(j, 1)
       } else {
         j++
       }
@@ -29,35 +29,71 @@ function randomSpherePoints(radius, density, minDistance: number): THREE.Vector3
   return pts
 }
 
-function vector3ToLongLat(vec: THREE.Vector3): GeoJSON.Position {
+function vector3ToLongLat(vec: THREE.Vector3): GJ.Position {
   const sph = new THREE.Spherical().setFromVector3(vec)
   const long = (sph.theta / (2 * Math.PI) * 360 + 180) % 360 - 180
   const lat = -(sph.phi / (2 * Math.PI) * 360) + 90
   return [long, lat]
 }
 
-function longLatToVector3(coords: GeoJSON.Position, radius: number): THREE.Vector3 {
+function vector3ListToPtCollection(vecs: THREE.Vector3[]): GJ.FeatureCollection<GJ.Point> {
+  const geoPts = vecs.map(v => {
+    const pos = vector3ToLongLat(v)
+    const geom: GJ.Point = {
+      type: 'Point',
+      coordinates: pos,
+    }
+
+    const feature: GJ.Feature<GJ.Point> = {
+      type: 'Feature',
+      geometry: geom,
+      properties: null,
+    }
+
+    return feature
+  })
+
+  return {
+    type: 'FeatureCollection',
+    features: geoPts,
+  }
+}
+
+function longLatToVector3(coords: GJ.Position, radius: number): THREE.Vector3 {
   const theta = (coords[0] % 360) / 360 * 2 * Math.PI
   const phi = -(coords[1] - 90) / 360 * 2 * Math.PI
   const sph = new THREE.Spherical(radius, phi, theta)
   return new THREE.Vector3().setFromSpherical(sph)
 }
 
-function voronoiPolygons(radius: number): THREE.Vector3[][] {
-  const voronoiPoints = randomSpherePoints(radius, 20, 0.2)
-  const longLatPts = voronoiPoints.map(vector3ToLongLat)
-
-  const voronoi = d3.geoVoronoi(longLatPts)
-  const polys: GeoJSON.FeatureCollection<GeoJSON.Polygon, null> = voronoi.polygons()
-  return polys.features.map(poly =>
-    poly.geometry.coordinates.map(longLatToVector3.bind(null, null, radius)),
-  )
+function voronoiPolygons(spherePoints: THREE.Vector3[]): THREE.Vector3[][] {
+  const radius = spherePoints[0].length()
+  return d3
+    .geoVoronoi()
+    .polygons(vector3ListToPtCollection(spherePoints))
+    .features.map(poly =>
+      poly.geometry.coordinates[0].map(coords => longLatToVector3(coords, radius)),
+    )
 }
 
-export default function genSphere(): THREE.Object3D {
-  const geom = new THREE.Geometry()
-  geom.vertices = randomSpherePoints(5, 0.25, 0.2)
-  const material = new THREE.PointsMaterial({size: 0.5, color: 0xff00ff})
+export default function genPlanet(): THREE.Object3D {
+  const pts = randomSpherePoints(5, 0.25, 1.4)
 
-  return new THREE.Points(geom, material)
+  const ptsGeom = new THREE.Geometry()
+  ptsGeom.vertices = pts
+  const ptsMaterial = new THREE.PointsMaterial({size: 0.5, color: 0xff00ff})
+  const ptsObj = new THREE.Points(ptsGeom, ptsMaterial)
+
+  const linesMaterial = new THREE.LineBasicMaterial({linewidth: 5, color: 0x0000ff77})
+  const polyObjs = voronoiPolygons(pts).map(poly => {
+    const linesGeom = new THREE.Geometry()
+    linesGeom.vertices = poly.slice()
+
+    return new THREE.Line(linesGeom, linesMaterial)
+  })
+
+  const group = new THREE.Group()
+  group.add(ptsObj)
+  for (let poly of polyObjs) group.add(poly)
+  return group
 }
