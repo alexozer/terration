@@ -1,99 +1,41 @@
-import * as GJ from 'geojson'
-import * as d3 from 'd3-geo-voronoi'
+import * as Voronoi from './voronoi'
 
-const EPSILON = 0.0000001
-
-function randomSpherePoints(radius, density, minDistance: number): THREE.Vector3[] {
-  const maxPoints = 4 * Math.PI * radius * radius * density
-
-  // Generate uniformly-distributed random spherical coordinates with ocnstant radius
-  let pts: THREE.Vector3[] = []
-  for (let n = 0; n < maxPoints; n++) {
-    // Distribution for phi is not constant, see http://mathworld.wolfram.com/SpherePointPicking.html
-    const theta = Math.random() * 2 * Math.PI
-    const phi = Math.acos(2 * Math.random() - 1)
-    pts.push(new THREE.Vector3().setFromSpherical(new THREE.Spherical(radius, phi, theta)))
-  }
-
-  // Remove too-close points
-  for (let i = 0; i < pts.length; i++) {
-    for (let j = i + 1; j < pts.length; ) {
-      if (pts[i].distanceToSquared(pts[j]) < minDistance * minDistance) {
-        pts.splice(j, 1)
-      } else {
-        j++
-      }
-    }
-  }
-
-  return pts
-}
-
-function vector3ToLongLat(vec: THREE.Vector3): GJ.Position {
-  const sph = new THREE.Spherical().setFromVector3(vec)
-  const long = (sph.theta / (2 * Math.PI) * 360 + 180) % 360 - 180
-  const lat = -(sph.phi / (2 * Math.PI) * 360) + 90
-  return [long, lat]
-}
-
-function vector3ListToPtCollection(vecs: THREE.Vector3[]): GJ.FeatureCollection<GJ.Point> {
-  const geoPts = vecs.map(v => {
-    const pos = vector3ToLongLat(v)
-    const geom: GJ.Point = {
-      type: 'Point',
-      coordinates: pos,
-    }
-
-    const feature: GJ.Feature<GJ.Point> = {
-      type: 'Feature',
-      geometry: geom,
-      properties: null,
-    }
-
-    return feature
-  })
-
-  return {
-    type: 'FeatureCollection',
-    features: geoPts,
-  }
-}
-
-function longLatToVector3(coords: GJ.Position, radius: number): THREE.Vector3 {
-  const theta = (coords[0] % 360) / 360 * 2 * Math.PI
-  const phi = -(coords[1] - 90) / 360 * 2 * Math.PI
-  const sph = new THREE.Spherical(radius, phi, theta)
-  return new THREE.Vector3().setFromSpherical(sph)
-}
-
-function voronoiPolygons(spherePoints: THREE.Vector3[]): THREE.Vector3[][] {
-  const radius = spherePoints[0].length()
-  return d3
-    .geoVoronoi()
-    .polygons(vector3ListToPtCollection(spherePoints))
-    .features.map(poly =>
-      poly.geometry.coordinates[0].map(coords => longLatToVector3(coords, radius)),
-    )
-}
-
-export default function genPlanet(): THREE.Object3D {
-  const pts = randomSpherePoints(5, 0.25, 1.4)
-
-  const ptsGeom = new THREE.Geometry()
-  ptsGeom.vertices = pts
-  const ptsMaterial = new THREE.PointsMaterial({size: 0.5, color: 0xff00ff})
-  const ptsObj = new THREE.Points(ptsGeom, ptsMaterial)
-
-  const linesMaterial = new THREE.LineBasicMaterial({linewidth: 5, color: 0x0000ff77})
-  const polyObjs = voronoiPolygons(pts).map(poly => {
-    const linesGeom = new THREE.Geometry()
-    linesGeom.vertices = poly.slice()
-
-    return new THREE.Line(linesGeom, linesMaterial)
-  })
-
+export default function generate() {
+  const cellSphere = Voronoi.genCellSphere(10, 0.4, 0.5)
   const group = new THREE.Group()
-  group.add(ptsObj)
-  for (let poly of polyObjs) group.add(poly)
+
+  for (let cell of cellSphere.cells) {
+    // Build a matrix and its inverse to transform cell boundary from planet location such that:
+    // - Cell boundary lies in XY plane
+    // - Voronoi cell site coincident with (0, 0, 0)
+    // Coordinate system is right-handed with +X right, +Y up, and +Z towards
+
+    const spherical = new THREE.Spherical().setFromVector3(cell.site)
+
+    const replaceCellRot = new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(spherical.phi - Math.PI / 2, spherical.theta, 0, 'YXZ'),
+    )
+    const replaceCellTranslate = new THREE.Matrix4().makeTranslation(0, 0, cellSphere.radius)
+    const replaceCell = new THREE.Matrix4().multiplyMatrices(replaceCellRot, replaceCellTranslate)
+    const focusCell = new THREE.Matrix4().getInverse(replaceCell, true)
+
+    const focusedBoundary = cell.boundary.map(pt =>
+      new THREE.Vector3().copy(pt).applyMatrix4(focusCell),
+    )
+
+    const filledCell = fillCell(focusedBoundary)
+    const filledMat = new THREE.Matrix4().copy(filledCell.matrix)
+    filledCell.matrix.multiplyMatrices(replaceCell, filledMat)
+    filledCell.matrixAutoUpdate = false
+
+    group.add(filledCell)
+  }
+
+  group.add(Voronoi.toObject3D(cellSphere))
+
   return group
+}
+
+function fillCell(boundary: THREE.Vector3[]): THREE.Object3D {
+  return new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 10), new THREE.MeshNormalMaterial())
 }

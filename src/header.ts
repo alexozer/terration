@@ -18,7 +18,7 @@ Aframe.registerComponent(PLANET, {
   },
 
   tick: function(time, timeDelta) {
-    const period = 3000
+    const period = 10000
     this.el.getObject3D(PLANET).rotation.y = (time % period) / period * 2 * Math.PI
   },
 })
