@@ -18,7 +18,7 @@
   "homepage": "https://github.com/alexozer/terration#readme",
   "dependencies": {
     "aframe": "^1.6.0",
-    "d3-geo-voronoi": "0.0.5"
+    "d3-geo-voronoi": "2.1.0"
   },
   "devDependencies": {
     "typescript": "^2.6.2",
